@@ -9,6 +9,7 @@ import {
 import { getEmbeddings } from "./embeddings";
 import { convertToAscii } from "./utils";
 
+// Function to initialize the Pinecone client with your API key
 export const getPineconeClient = () => {
   return new Pinecone({
     apiKey: process.env.PINECONE_API_KEY!,
@@ -22,34 +23,36 @@ type PDFPage = {
   };
 };
 
+// Function to load data from S3 into Pinecone serverless index
 export async function loadS3IntoPinecone(fileKey: string) {
-  // 1. obtain the pdf -> download and read from pdf
-  console.log("downloading s3 into file system");
-  const file_name = await downloadFromS3(fileKey);
-  if (!file_name) {
-    throw new Error("could not download from s3");
+  // 1. Download and read PDF from S3
+  console.log("Downloading from S3 into file system");
+  const fileName = await downloadFromS3(fileKey);
+  if (!fileName) {
+    throw new Error("Could not download from S3");
   }
-  console.log("loading pdf into memory" + file_name);
-  const loader = new PDFLoader(file_name);
+  console.log("Loading PDF into memory: " + fileName);
+  const loader = new PDFLoader(fileName);
   const pages = (await loader.load()) as PDFPage[];
 
-  // 2. split and segment the pdf
+  // 2. Split and segment the PDF
   const documents = await Promise.all(pages.map(prepareDocument));
 
-  // 3. vectorize and embed individual documents
+  // 3. Vectorize and embed individual documents
   const vectors = await Promise.all(documents.flat().map(embedDocument));
 
-  // 4. upload to pinecone
+  // 4. Upload to Pinecone serverless index
   const client = await getPineconeClient();
-  const pineconeIndex = await client.index("devaid");
+  const pineconeIndex = await client.index("devaid"); // Update index name
   const namespace = pineconeIndex.namespace(convertToAscii(fileKey));
 
-  console.log("inserting vectors into pinecone");
+  console.log("Inserting vectors into Pinecone serverless index");
   await namespace.upsert(vectors);
 
   return documents[0];
 }
 
+// Function to embed document content and metadata into Pinecone format
 async function embedDocument(doc: Document) {
   try {
     const embeddings = await getEmbeddings(doc.pageContent);
@@ -64,20 +67,22 @@ async function embedDocument(doc: Document) {
       },
     } as PineconeRecord;
   } catch (error) {
-    console.log("error embedding document", error);
+    console.log("Error embedding document", error);
     throw error;
   }
 }
 
+// Function to truncate string by bytes
 export const truncateStringByBytes = (str: string, bytes: number) => {
   const enc = new TextEncoder();
   return new TextDecoder("utf-8").decode(enc.encode(str).slice(0, bytes));
 };
 
+// Function to prepare document by splitting into segments
 async function prepareDocument(page: PDFPage) {
   let { pageContent, metadata } = page;
   pageContent = pageContent.replace(/\n/g, "");
-  // split the docs
+  // Split the docs
   const splitter = new RecursiveCharacterTextSplitter();
   const docs = await splitter.splitDocuments([
     new Document({
